@@ -77,6 +77,26 @@ public class ConfigAutoUpdater {
                 changed = true;
             }
 
+            String adv = "Advanced Fear Overrides";
+            if (!cfg.contains(adv + ".fearofsoundadvance")) {
+                cfg.set(adv + ".fearofsoundadvance", java.util.Collections.emptyList());
+                cfg.setComment(
+                    adv + ".fearofsoundadvance",
+                    String.join("\n",
+                        "Advanced conditional rules that gate whether a mob fears a sound.",
+                        "Format: name;entities;nbt_or_predicates;sounds",
+                        "- entities/sounds: comma-separated resource locations or '*'",
+                        "- nbt_or_predicates: OR list of SNBT objects or predicates (health<=X, health>=X, health<X, health>X, health_pct<=p)",
+                        "Examples:",
+                        "  low_health_any;*;health_pct<=0.30;*",
+                        "  low_health_bell_fear;minecraft:zombie, minecraft:skeleton;health<=8;minecraft:block.bell.use",
+                        "  baby_cows_bell;minecraft:cow;{Age:-2147483648};minecraft:block.bell.use",
+                        "  zombie_low_hp_tacz;minecraft:zombie;health_pct<0.30;tacz:gun"
+                    )
+                );
+                changed = true;
+            }
+
             if (changed) {
                 cfg.save();
                 FearofSoundMod.LOGGER.info("[FearOfSound] Auto-updated config with new keys. A backup was saved as {}", backupPath.getFileName());

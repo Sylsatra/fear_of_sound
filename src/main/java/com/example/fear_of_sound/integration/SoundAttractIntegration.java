@@ -1,6 +1,7 @@
 package com.example.fear_of_sound.integration;
 
 import com.example.fear_of_sound.SoundTracker.SoundRecord;
+import com.example.fear_of_sound.config.AdvancedFearOverrideRegistry;
 import com.example.fear_of_sound.config.FearofSoundConfig;
 import com.example.fear_of_sound.config.FearofSoundConfig.SoundConfig;
 import com.example.soundattract.SoundAttractNetwork;
@@ -11,6 +12,7 @@ import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -21,7 +23,7 @@ public class SoundAttractIntegration {
             return;
         }
         SoundMessage msg = new SoundMessage(
-                soundId, x, y, z, dimension, sourcePlayerUUID, range, weight, null, null
+                soundId, x, y, z, dimension, sourcePlayerUUID, range, weight
         );
         SoundAttractNetwork.INSTANCE.sendToServer(msg);
     }
@@ -60,6 +62,10 @@ public class SoundAttractIntegration {
             return null;
         }
 
+        ResourceLocation sid = attractSound.sound != null ? ForgeRegistries.SOUND_EVENTS.getKey(attractSound.sound) : null;
+        if (!AdvancedFearOverrideRegistry.shouldFear(mob, sid)) {
+            return null;
+        }
         return new SoundRecord(
                 attractSound.sound,
                 attractSound.pos,

@@ -27,6 +27,7 @@ public class FearofSoundConfig {
         public final ForgeConfigSpec.DoubleValue mobMoveSpeed;
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> playerStepSounds;
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> playerSpeedConfigsRaw;
+        public final ForgeConfigSpec.ConfigValue<List<? extends String>> fearofsoundadvance;
         public final ForgeConfigSpec.BooleanValue enableSoundBasedDetection;
         public final ForgeConfigSpec.BooleanValue enableMovementBasedDetection;
         public final ForgeConfigSpec.IntValue movementCheckFrequencyTicks;
@@ -403,7 +404,27 @@ public class FearofSoundConfig {
                 .comment("Initial panic delay maximum (ticks). If max > min, a random value in [min, max) is used.")
                 .defineInRange("panicMaxTicks", 0, 0, 200);
             builder.pop();
-            
+
+            builder.push("Advanced Fear Overrides");
+            fearofsoundadvance = builder
+                .comment(
+                    "Advanced conditional rules that gate whether a mob fears a sound.",
+                    "Format: name;entities;nbt_or_predicates;sounds",
+                    "- entities/sounds: comma-separated resource locations or '*'",
+                    "- nbt_or_predicates: OR list of SNBT objects or predicates (health<=X, health>=X, health<X, health>X, health_pct<=p)",
+                    "Examples:",
+                    "  low_health_any;*;health_pct<=0.30;*",
+                    "  low_health_bell_fear;minecraft:zombie, minecraft:skeleton;health<=8;minecraft:block.bell.use",
+                    "  baby_cows_bell;minecraft:cow;{Age:-2147483648};minecraft:block.bell.use",
+                    "  zombie_low_hp_tacz;minecraft:zombie;health_pct<0.30;tacz:gun"
+                )
+                .defineList(
+                    "fearofsoundadvance",
+                    java.util.Collections.emptyList(),
+                    obj -> obj instanceof String
+                );
+            builder.pop();
+
             builder.push("Line-of-sight fear parameters");
 
             losRange = builder
@@ -685,6 +706,14 @@ public class FearofSoundConfig {
 
         bakedSpeedConfigs.sort(Comparator.comparingDouble(c -> c.minSpeed));
         PLAYER_SPEED_CONFIGS_CACHE = bakedSpeedConfigs;
+
+        // Rebuild advanced fear overrides from config
+        try {
+            AdvancedFearOverrideRegistry.rebuild(COMMON.fearofsoundadvance.get());
+        } catch (Throwable t) {
+            FearofSoundMod.LOGGER.warn("[AdvancedFear] Failed to rebuild overrides: {}", t.toString());
+            AdvancedFearOverrideRegistry.clear();
+        }
 
         VOICE_CHAT_ENABLED_CACHE = ModList.get().isLoaded("voicechat") && COMMON.enableVoiceChatIntegration.get();
         VOICE_CHAT_DETECTION_ENABLED_CACHE = VOICE_CHAT_ENABLED_CACHE;

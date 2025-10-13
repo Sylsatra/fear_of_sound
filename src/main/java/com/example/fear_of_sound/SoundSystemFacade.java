@@ -1,5 +1,6 @@
 package com.example.fear_of_sound;
 
+import com.example.fear_of_sound.config.AdvancedFearOverrideRegistry;
 import com.example.fear_of_sound.integration.SoundAttractIntegration;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
@@ -37,7 +38,11 @@ public class SoundSystemFacade {
         if (FearofSoundMod.isSoundAttractLoaded) {
             return SoundAttractIntegration.findNearestSound(mob);
         } else {
-            return SoundTracker.findNearestSound(mob.level(), mob.blockPosition());
+            SoundTracker.SoundRecord rec = SoundTracker.findNearestSound(mob.level(), mob.blockPosition());
+            if (rec == null) return null;
+            ResourceLocation sid = rec.sound != null ? ForgeRegistries.SOUND_EVENTS.getKey(rec.sound) : null;
+            if (!AdvancedFearOverrideRegistry.shouldFear(mob, sid)) return null;
+            return rec;
         }
     }
 }
