@@ -1,5 +1,6 @@
 package com.example.fear_of_sound.integration;
 
+import com.example.fear_of_sound.FearofSoundMod;
 import com.example.fear_of_sound.SoundTracker;
 import com.example.fear_of_sound.config.FearofSoundConfig;
 import com.tacz.guns.api.event.common.GunReloadEvent;
@@ -15,6 +16,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.registries.ForgeRegistries;
 
 public class TaczIntegrationEvents {
@@ -49,6 +51,10 @@ public class TaczIntegrationEvents {
                     weight,
                     lifetime
             );
+
+            if (FearofSoundMod.isSoundAttractLoaded) {
+                SoundAttractIntegration.addSoundDirect(TACZ_GUN_SOUND, pos, dimensionKey, range, weight, lifetime);
+            }
         }
     }
 
@@ -79,6 +85,10 @@ public class TaczIntegrationEvents {
                     weight,
                     lifetime
             );
+
+            if (FearofSoundMod.isSoundAttractLoaded) {
+                SoundAttractIntegration.addSoundDirect(taczGunSound, pos, dimensionKey, range, weight, lifetime);
+            }
         }
     }
 

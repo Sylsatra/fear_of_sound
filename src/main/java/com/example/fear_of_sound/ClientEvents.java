@@ -69,6 +69,7 @@ public class ClientEvents {
                 Optional<UUID> sourcePlayerUUID = Optional.empty();
                 int calculatedRange = -1;
                 double calculatedWeight = 1.0;
+                String playerAction = null;
 
                 if (FearofSoundConfig.PLAYER_STEP_SOUNDS_CACHE.contains(se) &&
                     clientPlayer.position().distanceToSqr(x, y, z) < 1.5 * 1.5) {
@@ -98,6 +99,8 @@ public class ClientEvents {
                         }
                     }
 
+                    playerAction = currentAction.name();
+
                     switch (currentAction) {
                         case CRAWLING:        calculatedRange = 3;  calculatedWeight = 1.0; break;
                         case SNEAKING:        calculatedRange = 5;  calculatedWeight = 1.0; break;
@@ -108,7 +111,8 @@ public class ClientEvents {
                     }
                 }
 
-                SoundSystemFacade.broadcastClientSound(soundRL, x, y, z, dim, sourcePlayerUUID, calculatedRange, calculatedWeight);
+                SoundSystemFacade.broadcastClientSound(soundRL, x, y, z, dim, sourcePlayerUUID,
+                        calculatedRange, calculatedWeight, playerAction);
             }
         } finally {
             IS_HANDLING_SOUND.remove();

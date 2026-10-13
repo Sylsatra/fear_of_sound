@@ -32,11 +32,6 @@ public class FearofSoundMod {
 
         MinecraftForge.EVENT_BUS.register(ForgeEvents.class);
 
-        try {
-            MinecraftForge.EVENT_BUS.register(com.example.fear_of_sound.integration.SoundAttractLOSIntegration.class);
-        } catch (Throwable t) {
-            LOGGER.error("[FearOfSound] Failed to register SoundAttractLOSIntegration.", t);
-        }
     }
 
     private void commonSetup(final FMLCommonSetupEvent event) {
@@ -49,12 +44,16 @@ public class FearofSoundMod {
             LOGGER.error("[FearOfSound] Failed to bake config during common setup.", t);
         }
         isSoundAttractLoaded = ModList.get().isLoaded("soundattract");
-
-        if (!isSoundAttractLoaded) {
-            SoundNetwork.init();
-        }
+        SoundNetwork.init();
         
         event.enqueueWork(this::handleTaczIntegration);
+        event.enqueueWork(() -> {
+            try {
+                com.example.fear_of_sound.quantified.QuantifiedIntegration.bootstrap();
+            } catch (Throwable t) {
+                LOGGER.error("[FearOfSound] Failed to bootstrap Quantified integration.", t);
+            }
+        });
     }
 
     private void handleTaczIntegration() {
@@ -80,9 +79,7 @@ public class FearofSoundMod {
         @SubscribeEvent
         public static void onServerTick(TickEvent.ServerTickEvent event) {
             if (event.phase == TickEvent.Phase.END) {
-                if (!isSoundAttractLoaded) {
-                    SoundTracker.tick();
-                }
+                SoundTracker.tick();
             }
         }
     }

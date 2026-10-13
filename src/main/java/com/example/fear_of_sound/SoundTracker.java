@@ -12,19 +12,29 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.registries.ForgeRegistries;
 
+import com.example.fear_of_sound.quantified.QuantifiedCacheCompat;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
 public class SoundTracker {
 
     public static class SoundRecord {
         public final SoundEvent sound;
+        public final String soundId;
         public final BlockPos pos;
         public int ticksRemaining;
         public final String dimensionKey;
@@ -32,7 +42,12 @@ public class SoundTracker {
         public final double weight;
 
         public SoundRecord(SoundEvent sound, BlockPos pos, int lifetime, String dimensionKey, double range, double weight) {
+            this(sound, sound == null ? null : sound.getLocation().toString(), pos, lifetime, dimensionKey, range, weight);
+        }
+
+        public SoundRecord(SoundEvent sound, String soundId, BlockPos pos, int lifetime, String dimensionKey, double range, double weight) {
             this.sound = sound;
+            this.soundId = soundId;
             this.pos = pos;
             this.ticksRemaining = lifetime;
             this.dimensionKey = dimensionKey;
@@ -61,10 +76,13 @@ public class SoundTracker {
     }
 
     private static int CURRENT_TICK = 0;
+    private static volatile UUID CACHE_SESSION = UUID.randomUUID();
 
     private static final List<SoundRecord> RECENT_SOUNDS = new ArrayList<>();
     private static final Map<CellKey, List<SoundRecord>> SPATIAL_INDEX = new HashMap<>();
     private static int MAX_RANGE_SEEN = 0;
+
+    private static final ConcurrentHashMap<String, TagKey<Block>> TAG_KEY_CACHE = new ConcurrentHashMap<>();
 
     public static synchronized void addSound(SoundEvent se, BlockPos pos, String dimensionKey) {
         FearofSoundConfig.SoundConfig config = FearofSoundConfig.SOUND_CONFIGS_CACHE.get(se);
@@ -128,20 +146,24 @@ public class SoundTracker {
         public final BlockPos soundPos;
         public final String soundId;
         public final String dimensionKey;
-        public RaycastCacheKey(BlockPos mobPos, BlockPos soundPos, String soundId, String dimensionKey) {
+        public final long configGeneration;
+        public RaycastCacheKey(BlockPos mobPos, BlockPos soundPos, String soundId, String dimensionKey, long configGeneration) {
             this.mobPos = mobPos;
             this.soundPos = soundPos;
             this.soundId = soundId;
             this.dimensionKey = dimensionKey;
+            this.configGeneration = configGeneration;
         }
         @Override
         public boolean equals(Object o) {
             if (!(o instanceof RaycastCacheKey other)) return false;
-            return mobPos.equals(other.mobPos) && soundPos.equals(other.soundPos) && soundId.equals(other.soundId) && dimensionKey.equals(other.dimensionKey);
+            return mobPos.equals(other.mobPos) && soundPos.equals(other.soundPos) && soundId.equals(other.soundId)
+                    && dimensionKey.equals(other.dimensionKey) && configGeneration == other.configGeneration;
         }
         @Override
         public int hashCode() {
-            return mobPos.hashCode() ^ soundPos.hashCode() ^ soundId.hashCode() ^ dimensionKey.hashCode();
+            return mobPos.hashCode() ^ soundPos.hashCode() ^ soundId.hashCode() ^ dimensionKey.hashCode()
+                    ^ Long.hashCode(configGeneration);
         }
     }
     private static class RaycastCacheValue {
@@ -149,17 +171,61 @@ public class SoundTracker {
         public final int tick;
         public RaycastCacheValue(double[] result, int tick) { this.result = result; this.tick = tick; }
     }
-    private static final LinkedHashMap<RaycastCacheKey, RaycastCacheValue> RAYCAST_CACHE = new LinkedHashMap<>(128, 0.75f, true);
+    private static final Cache<RaycastCacheKey, RaycastCacheValue> RAYCAST_CACHE = Caffeine.newBuilder()
+            .maximumSize(16384)
+            .expireAfterWrite(2, TimeUnit.MINUTES)
+            .build();
+
+    public static synchronized void clearTransientState() {
+        RECENT_SOUNDS.clear();
+        SPATIAL_INDEX.clear();
+        MAX_RANGE_SEEN = 0;
+        RAYCAST_CACHE.invalidateAll();
+        CURRENT_TICK = 0;
+        CACHE_SESSION = UUID.randomUUID();
+    }
 
     public static double[] applyBlockMuffling(Level level, BlockPos src, BlockPos dst, double origRange, double origWeight, String soundId) {
         String dimKey = level.dimension().location().toString();
-        RaycastCacheKey key = new RaycastCacheKey(dst, src, soundId, dimKey);
-        synchronized (RAYCAST_CACHE) {
-            RaycastCacheValue cached = RAYCAST_CACHE.get(key);
-            if (cached != null && (CURRENT_TICK - cached.tick) <= FearofSoundConfig.RAYCAST_CACHE_TTL_TICKS_CACHE) {
-                return cached.result;
+
+        int ttlTicks = FearofSoundConfig.RAYCAST_CACHE_TTL_TICKS_CACHE;
+        int maxEntries = FearofSoundConfig.RAYCAST_CACHE_MAX_ENTRIES_CACHE;
+        if (ttlTicks > 0 && maxEntries > 0 && FearofSoundConfig.QUANTIFIED_INTEGRATION_ENABLED_CACHE && QuantifiedCacheCompat.isUsable()) {
+            Duration ttl = Duration.ofMillis(Math.max(1L, (long) ttlTicks) * 50L);
+            String key = CACHE_SESSION + "|" + FearofSoundConfig.CONFIG_GENERATION + "|" + dimKey + "|" + soundId + "|"
+                    + src.getX() + "," + src.getY() + "," + src.getZ() + "|" + dst.getX() + "," + dst.getY() + "," + dst.getZ();
+            return QuantifiedCacheCompat.getCached(
+                    "fear_of_sound_raycast",
+                    key,
+                    () -> computeBlockMuffling(level, src, dst, origRange, origWeight),
+                    ttl,
+                    (long) maxEntries,
+                    false
+            );
+        }
+
+        RaycastCacheKey key = new RaycastCacheKey(dst, src, soundId, dimKey, FearofSoundConfig.CONFIG_GENERATION);
+        RaycastCacheValue cached = RAYCAST_CACHE.getIfPresent(key);
+        if (cached != null && CURRENT_TICK - cached.tick >= 0
+                && CURRENT_TICK - cached.tick <= FearofSoundConfig.RAYCAST_CACHE_TTL_TICKS_CACHE) {
+            return cached.result.clone();
+        }
+        double[] result = computeBlockMuffling(level, src, dst, origRange, origWeight);
+        RAYCAST_CACHE.put(key, new RaycastCacheValue(result.clone(), CURRENT_TICK));
+        int configuredMax = Math.max(0, Math.min(16384, FearofSoundConfig.RAYCAST_CACHE_MAX_ENTRIES_CACHE));
+        if (configuredMax == 0) {
+            RAYCAST_CACHE.invalidateAll();
+        } else if (RAYCAST_CACHE.asMap().size() > configuredMax) {
+            Iterator<RaycastCacheKey> iterator = RAYCAST_CACHE.asMap().keySet().iterator();
+            while (RAYCAST_CACHE.asMap().size() > configuredMax && iterator.hasNext()) {
+                iterator.next();
+                iterator.remove();
             }
         }
+        return result.clone();
+    }
+
+    private static double[] computeBlockMuffling(Level level, BlockPos src, BlockPos dst, double origRange, double origWeight) {
         double range = origRange;
         double weight = origWeight;
         int x0 = src.getX(), y0 = src.getY(), z0 = src.getZ();
@@ -198,36 +264,33 @@ public class SoundTracker {
         }
         if (range < 0) range = 0;
         if (weight < 0) weight = 0;
-        double[] result = new double[]{range, weight};
-        synchronized (RAYCAST_CACHE) {
-            RAYCAST_CACHE.put(key, new RaycastCacheValue(result, CURRENT_TICK));
-
-            while (RAYCAST_CACHE.size() > FearofSoundConfig.RAYCAST_CACHE_MAX_ENTRIES_CACHE) {
-                Iterator<Map.Entry<RaycastCacheKey, RaycastCacheValue>> it = RAYCAST_CACHE.entrySet().iterator();
-                if (it.hasNext()) { it.next(); it.remove(); } else break;
-            }
-        }
-        return result;
+        return new double[]{range, weight};
     }
 
     private static boolean isBlockInConfigList(BlockState state, Block block, java.util.List<String> configList) {
         ResourceLocation id = ForgeRegistries.BLOCKS.getKey(block);
-        if (id != null && configList.contains(id.toString())) return true;
+        String idStr = (id != null ? id.toString() : null);
         for (String entry : configList) {
-            if (entry.startsWith("#")) {
+            if (entry == null || entry.isEmpty()) continue;
+            if (entry.charAt(0) == '#') {
                 String tagName = entry.substring(1);
-                TagKey<Block> tagKey = TagKey.create(Registries.BLOCK, new ResourceLocation(tagName));
+                TagKey<Block> tagKey = TAG_KEY_CACHE.computeIfAbsent(tagName, t -> TagKey.create(Registries.BLOCK, new ResourceLocation(t)));
                 if (state.is(tagKey)) return true;
+            } else if (idStr != null && entry.equals(idStr)) {
+                return true;
             }
         }
         return false;
     }
+
     private static boolean isCustomWool(BlockState state, Block block) {
         return isBlockInConfigList(state, block, FearofSoundConfig.CUSTOM_WOOL_BLOCKS_CACHE) || state.is(BlockTags.WOOL);
     }
+
     private static boolean isCustomSolid(BlockState state, Block block) {
         return isBlockInConfigList(state, block, FearofSoundConfig.CUSTOM_SOLID_BLOCKS_CACHE) || state.isSolid();
     }
+
     private static boolean isCustomNonSolid(BlockState state, Block block) {
         return isBlockInConfigList(state, block, FearofSoundConfig.CUSTOM_NON_SOLID_BLOCKS_CACHE) || !state.isSolid();
     }
@@ -277,24 +340,33 @@ public class SoundTracker {
         }
         return out;
     }
-
+ 
     public static void pruneIrrelevantSounds(Level level) {
         if (RECENT_SOUNDS.isEmpty()) return;
-        List<Mob> mobs = level.getEntitiesOfClass(Mob.class, level.getWorldBorder().getCollisionShape().bounds());
         Iterator<SoundRecord> iter = RECENT_SOUNDS.iterator();
         while (iter.hasNext()) {
             SoundRecord sound = iter.next();
             if (sound.ticksRemaining > 5) continue;
+
+            double baseRange = Math.max(0.0, sound.range);
+            AABB nearbyBox = new AABB(sound.pos).inflate(baseRange + 1.0);
+            List<Mob> mobs = level.getEntitiesOfClass(Mob.class, nearbyBox);
             boolean inRange = false;
             for (Mob mob : mobs) {
                 if (!mob.isAlive()) continue;
                 BlockPos mobPos = mob.blockPosition();
                 ResourceLocation soundLoc = sound.sound != null ? ForgeRegistries.SOUND_EVENTS.getKey(sound.sound) : null;
                 String soundId = soundLoc != null ? soundLoc.toString() : "fear_of_sound:voicechat";
+
+                double baseRangeSqr = baseRange * baseRange;
+                double baseDistSqr = mobPos.distSqr(sound.pos);
+                if (baseDistSqr > baseRangeSqr) {
+                    continue;
+                }
+
                 double[] muffled = applyBlockMuffling(level, sound.pos, mobPos, sound.range, sound.weight, soundId);
                 double range = muffled[0];
-                double distSqr = mobPos.distSqr(sound.pos);
-                if (distSqr <= range * range) {
+                if (baseDistSqr <= range * range) {
                     inRange = true;
                     break;
                 }
@@ -318,6 +390,13 @@ public class SoundTracker {
         for (SoundRecord r : candidates) {
             if (!r.dimensionKey.equals(dimensionKey)) continue;
 
+            double baseRange = r.range;
+            double baseRangeSqr = baseRange * baseRange;
+            double distSqr = mobPos.distSqr(r.pos);
+            if (distSqr > baseRangeSqr) {
+                continue;
+            }
+
             ResourceLocation soundLoc = r.sound != null ? ForgeRegistries.SOUND_EVENTS.getKey(r.sound) : null;
             String soundId = soundLoc != null ? soundLoc.toString() : "fear_of_sound:voicechat";
             double[] muffled = applyBlockMuffling(level, r.pos, mobPos, r.range, r.weight, soundId);
@@ -325,7 +404,6 @@ public class SoundTracker {
             double muffledWeight = muffled[1];
 
             double rangeSqr = muffledRange * muffledRange;
-            double distSqr = mobPos.distSqr(r.pos);
 
             if (distSqr <= rangeSqr) {
                 if (muffledWeight > highestWeight || (Math.abs(muffledWeight - highestWeight) < 0.001 && distSqr < closestDistSqr)) {
@@ -336,9 +414,6 @@ public class SoundTracker {
             }
         }
 
-        if (bestSound != null) {
-             FearofSoundMod.LOGGER.trace("[SoundTracker] Found best sound for mob at {}: {}", mobPos, bestSound);
-        }
         return bestSound;
     }
 }

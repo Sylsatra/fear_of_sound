@@ -18,10 +18,8 @@ public final class NbtMatchers {
                     return false;
                 }
             } else if (type == Tag.TAG_LIST) {
-                // Basic list equality check as in Sound Attract's implementation
                 if (!mobNbt.getList(key, matcherNbt.getList(key, 0).getElementType())
                         .equals(matcherNbt.getList(key, 0))) {
-                    // Do not fail hard; treat as non-match to be explicit
                     return false;
                 }
             } else {

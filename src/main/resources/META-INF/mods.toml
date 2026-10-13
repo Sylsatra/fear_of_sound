@@ -3,7 +3,7 @@ loaderVersion="[47,)"
 license="GPLv3"
 [[mods]]
 modId="fear_of_sound" 
-version="2.0.8" 
+version="${mod_version}" 
 displayName="Fear of Sound Mod" 
 logoFile="fear_of_sound.jpg"
 authors="Sylsatra" 
@@ -33,6 +33,13 @@ A mod to make mobs run away from sound
 [[dependencies.fear_of_sound]]
     modId="soundattract"
     mandatory=false
-    versionRange="[4.0.1,)"
+    versionRange="[7.0.2,8.0.0)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.fear_of_sound]]
+    modId="quantified"
+    mandatory=false
+    versionRange="[2.2.0,3.0.0)"
     ordering="AFTER"
     side="BOTH"

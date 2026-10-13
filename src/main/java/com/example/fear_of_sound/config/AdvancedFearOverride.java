@@ -11,11 +11,11 @@ import java.util.function.Predicate;
 
 public class AdvancedFearOverride {
     public final String name;
-    public final Set<EntityType<?>> entityTypes; // empty means wildcard
+    public final Set<EntityType<?>> entityTypes;
     public final boolean entityWildcard;
-    public final List<CompoundTag> nbtMatchers; // OR
-    public final List<Predicate<Mob>> predicates; // OR
-    public final Set<ResourceLocation> soundIds; // empty means wildcard
+    public final List<CompoundTag> nbtMatchers;
+    public final List<Predicate<Mob>> predicates;
+    public final Set<ResourceLocation> soundIds;
     public final boolean soundWildcard;
 
     public AdvancedFearOverride(String name,

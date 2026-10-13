@@ -12,8 +12,8 @@ public final class TopLevelCommaSplitter {
         String s = input.trim();
         if (s.isEmpty()) return out;
         StringBuilder current = new StringBuilder();
-        int brace = 0; // {}
-        int bracket = 0; // []
+        int brace = 0;
+        int bracket = 0;
         boolean inQuotes = false;
         char quoteChar = '\0';
         for (int i = 0; i < s.length(); i++) {
@@ -21,7 +21,6 @@ public final class TopLevelCommaSplitter {
             if (inQuotes) {
                 current.append(c);
                 if (c == quoteChar) {
-                    // handle escaped quotes like \" inside SNBT
                     int backslashes = 0;
                     int j = i - 1;
                     while (j >= 0 && s.charAt(j) == '\\') { backslashes++; j--; }

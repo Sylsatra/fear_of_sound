@@ -15,6 +15,7 @@ import javax.annotation.Nullable;
 import java.util.*;
 
 public class FearofSoundConfig {
+    public static volatile long CONFIG_GENERATION = 0L;
 
     public static class Common {
         public final ForgeConfigSpec.ConfigValue<List<? extends CommentedConfig>> bypassedEntities;
@@ -25,6 +26,11 @@ public class FearofSoundConfig {
         public final ForgeConfigSpec.IntValue scanCooldownTicks;
         public final ForgeConfigSpec.DoubleValue arrivalDistance;
         public final ForgeConfigSpec.DoubleValue mobMoveSpeed;
+        public final ForgeConfigSpec.BooleanValue enableHideAndFreeze;
+        public final ForgeConfigSpec.IntValue recoveryQuietTicks;
+        public final ForgeConfigSpec.BooleanValue enableScentAwareness;
+        public final ForgeConfigSpec.IntValue scentAwarenessRadius;
+        public final ForgeConfigSpec.IntValue scentMaxAgeTicks;
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> playerStepSounds;
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> playerSpeedConfigsRaw;
         public final ForgeConfigSpec.ConfigValue<List<? extends String>> fearofsoundadvance;
@@ -66,8 +72,8 @@ public class FearofSoundConfig {
         public final ForgeConfigSpec.IntValue losPerTickCap;
         public final ForgeConfigSpec.IntValue losScanRangeCap;
 
-
         public final ForgeConfigSpec.IntValue maxSoundsTracked;
+        public final ForgeConfigSpec.BooleanValue enableQuantifiedIntegration;
         public final ForgeConfigSpec.IntValue raycastCacheTtlTicks;
         public final ForgeConfigSpec.IntValue raycastCacheMaxEntries;
         public final ForgeConfigSpec.IntValue spatialGridSize;
@@ -98,10 +104,9 @@ public class FearofSoundConfig {
                 ), obj -> obj instanceof String && ResourceLocation.tryParse((String) obj) != null);
 
             playDeadEntities = builder
-                .comment("List of mobs that will play dead when scared. Example: ['minecraft:goat'].")
+                .comment("Legacy immediate-faint profile for selected mobs; interrupted by damage and bounded by the maximum freeze duration.")
                 .defineList("playDeadEntities", List.of("minecraft:goat"),
                     obj -> obj instanceof String && ResourceLocation.tryParse((String) obj) != null);
-
 
             soundConfigsRaw = builder
                 .comment("List of sounds that scare mobs. Format: 'soundId;range;weight'. Example: 'minecraft:block.bell.use;20;5' (range in blocks, weight = priority, higher means more scary).")
@@ -228,15 +233,32 @@ public class FearofSoundConfig {
                 .defineInRange("scanCooldownTicks", 10, 5, 100);
 
             arrivalDistance = builder
-                .comment("Safety buffer (in blocks) added to the current sound's range to decide when a mob is safe.\n"
-                    + "Effective safe distance = soundRange + arrivalDistance ± up to 50% randomization.\n"
-                    + "Mobs will START fleeing if they are within this distance, and STOP once they exceed it.\n"
-                    + "Increase to make mobs run farther from sounds; decrease if they overshoot too much.")
+                .comment("Desired clearance from a threat when scoring refuges. Larger values favor cover farther from the threat source.")
                 .defineInRange("arrivalDistance", 4.0, 1.0, 64.0);
 
             mobMoveSpeed = builder
-                .comment("The movement speed modifier for mobs moving away from a sound. 1.0 = normal mob speed, 2.0 = twice as fast.")
+                .comment("Movement speed modifier while a mob seeks cover or escapes. 1.0 = normal mob speed, 2.0 = twice as fast.")
                 .defineInRange("mobMoveSpeed", 1.5, 0.5, 2.0);
+
+            enableHideAndFreeze = builder
+                .comment("Enable adaptive fear: affected mobs seek cover, freeze when concealed, then recover after threats fade.")
+                .define("enableHideAndFreeze", true);
+
+            recoveryQuietTicks = builder
+                .comment("How long a mob waits without a threat before returning to calm. 20 ticks = 1 second.")
+                .defineInRange("recoveryQuietTicks", 60, 10, 600);
+
+            enableScentAwareness = builder
+                .comment("Use nearby Sound Attract scent as evidence: unfamiliar trails cause brief caution; fresh trails from known threats can trigger relocation.")
+                .define("enableScentAwareness", true);
+
+            scentAwarenessRadius = builder
+                .comment("Maximum radius for local scent evidence used by adaptive fear. The optional provider reads only nearby loaded scent chunks.")
+                .defineInRange("scentAwarenessRadius", 16, 4, 16);
+
+            scentMaxAgeTicks = builder
+                .comment("Maximum age for scent evidence used by adaptive fear. 20 ticks = 1 second.")
+                .defineInRange("scentMaxAgeTicks", 600, 20, 2400);
 
             woolBlockRangeReduction = builder
                 .comment("How much the range is reduced for each wool block between mob and sound. Example: 30 means wool blocks reduce the sound range by 30 blocks.")
@@ -501,6 +523,7 @@ public class FearofSoundConfig {
             maxSoundsTracked = builder
                 .comment("Maximum number of sounds to keep in memory when Sound Attract is absent. Older/weaker sounds are evicted when exceeded.")
                 .defineInRange("maxSoundsTracked", 512, 64, 8192);
+            enableQuantifiedIntegration = builder.define("enableQuantifiedIntegration", true);
             raycastCacheTtlTicks = builder
                 .comment("How long (ticks) to keep block muffling (raycast) results cached.")
                 .defineInRange("raycastCacheTtlTicks", 40, 0, 600);
@@ -516,8 +539,6 @@ public class FearofSoundConfig {
             builder.pop();
         }
     }
-
-
 
     public static final Common COMMON;
     public static final ForgeConfigSpec COMMON_SPEC;
@@ -564,12 +585,19 @@ public class FearofSoundConfig {
     public static double SOUND_SWITCH_RATIO_CACHE = 1.1;
     public static int PANIC_MIN_TICKS_CACHE = 0;
     public static int PANIC_MAX_TICKS_CACHE = 0;
+    public static boolean ENABLE_HIDE_AND_FREEZE_CACHE = true;
+    public static int RECOVERY_QUIET_TICKS_CACHE = 60;
+    public static double ARRIVAL_DISTANCE_CACHE = 4.0;
+    public static boolean SCENT_AWARENESS_ENABLED_CACHE = true;
+    public static int SCENT_AWARENESS_RADIUS_CACHE = 16;
+    public static int SCENT_MAX_AGE_TICKS_CACHE = 600;
     public static int LOS_RANGE_CACHE = 32;
     public static int LOS_COOLDOWN_CACHE = 20;
     public static int LOS_CHECK_INTERVAL_TICKS_CACHE = 20;
     public static int LOS_PER_TICK_CAP_CACHE = 64;
     public static int LOS_SCAN_RANGE_CAP_CACHE = 96;
     public static int MAX_SOUNDS_TRACKED_CACHE = 512;
+    public static boolean QUANTIFIED_INTEGRATION_ENABLED_CACHE = true;
     public static int RAYCAST_CACHE_TTL_TICKS_CACHE = 40;
     public static int RAYCAST_CACHE_MAX_ENTRIES_CACHE = 4096;
     public static int SPATIAL_GRID_SIZE_CACHE = 32;
@@ -707,7 +735,6 @@ public class FearofSoundConfig {
         bakedSpeedConfigs.sort(Comparator.comparingDouble(c -> c.minSpeed));
         PLAYER_SPEED_CONFIGS_CACHE = bakedSpeedConfigs;
 
-        // Rebuild advanced fear overrides from config
         try {
             AdvancedFearOverrideRegistry.rebuild(COMMON.fearofsoundadvance.get());
         } catch (Throwable t) {
@@ -730,6 +757,12 @@ public class FearofSoundConfig {
         SOUND_SWITCH_RATIO_CACHE = COMMON.soundSwitchRatio.get();
         PANIC_MIN_TICKS_CACHE = COMMON.panicMinTicks.get();
         PANIC_MAX_TICKS_CACHE = Math.max(COMMON.panicMaxTicks.get(), PANIC_MIN_TICKS_CACHE);
+        ENABLE_HIDE_AND_FREEZE_CACHE = COMMON.enableHideAndFreeze.get();
+        RECOVERY_QUIET_TICKS_CACHE = COMMON.recoveryQuietTicks.get();
+        ARRIVAL_DISTANCE_CACHE = COMMON.arrivalDistance.get();
+        SCENT_AWARENESS_ENABLED_CACHE = COMMON.enableScentAwareness.get();
+        SCENT_AWARENESS_RADIUS_CACHE = COMMON.scentAwarenessRadius.get();
+        SCENT_MAX_AGE_TICKS_CACHE = COMMON.scentMaxAgeTicks.get();
         LOS_RANGE_CACHE = COMMON.losRange.get();
         LOS_COOLDOWN_CACHE = COMMON.losCooldown.get();
         LOS_CHECK_INTERVAL_TICKS_CACHE = COMMON.losCheckIntervalTicks.get();
@@ -737,6 +770,7 @@ public class FearofSoundConfig {
         LOS_SCAN_RANGE_CAP_CACHE = COMMON.losScanRangeCap.get();
 
         MAX_SOUNDS_TRACKED_CACHE = COMMON.maxSoundsTracked.get();
+        QUANTIFIED_INTEGRATION_ENABLED_CACHE = COMMON.enableQuantifiedIntegration.get();
         RAYCAST_CACHE_TTL_TICKS_CACHE = COMMON.raycastCacheTtlTicks.get();
         RAYCAST_CACHE_MAX_ENTRIES_CACHE = COMMON.raycastCacheMaxEntries.get();
         SPATIAL_GRID_SIZE_CACHE = COMMON.spatialGridSize.get();
@@ -779,6 +813,7 @@ public class FearofSoundConfig {
             } catch (Exception e) {
             }
         }
+        CONFIG_GENERATION++;
     }
 
 }

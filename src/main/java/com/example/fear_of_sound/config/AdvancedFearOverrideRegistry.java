@@ -1,6 +1,7 @@
 package com.example.fear_of_sound.config;
 
 import com.example.fear_of_sound.FearofSoundMod;
+import com.example.fear_of_sound.quantified.QuantifiedCacheCompat;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.TagParser;
 import net.minecraft.resources.ResourceLocation;
@@ -9,6 +10,7 @@ import net.minecraft.world.entity.Mob;
 import net.minecraftforge.registries.ForgeRegistries;
 
 import javax.annotation.Nullable;
+import java.time.Duration;
 import java.util.*;
 import java.util.function.Predicate;
 
@@ -17,10 +19,12 @@ public final class AdvancedFearOverrideRegistry {
 
     private static final Map<EntityType<?>, List<AdvancedFearOverride>> BY_TYPE = new HashMap<>();
     private static final List<AdvancedFearOverride> WILDCARD = new ArrayList<>();
+    private static volatile boolean HAS_DYNAMIC_CONDITIONS = false;
 
     public static void clear() {
         BY_TYPE.clear();
         WILDCARD.clear();
+        HAS_DYNAMIC_CONDITIONS = false;
     }
 
     public static void rebuild(List<? extends String> raw) {
@@ -35,6 +39,9 @@ public final class AdvancedFearOverrideRegistry {
             try {
                 AdvancedFearOverride rule = parseLine(trimmed);
                 if (rule == null) { bad++; continue; }
+                if ((rule.nbtMatchers != null && !rule.nbtMatchers.isEmpty()) || (rule.predicates != null && !rule.predicates.isEmpty())) {
+                    HAS_DYNAMIC_CONDITIONS = true;
+                }
                 if (rule.entityWildcard) {
                     WILDCARD.add(rule);
                 } else {
@@ -55,7 +62,6 @@ public final class AdvancedFearOverrideRegistry {
 
     @Nullable
     private static AdvancedFearOverride parseLine(String line) {
-        // name;entities;nbt_or_predicates;sounds
         String[] parts = line.split(";", 4);
         if (parts.length != 4) {
             FearofSoundMod.LOGGER.warn("[AdvancedFear] Malformed entry (need 4 ';' sections): {}", line);
@@ -163,7 +169,26 @@ public final class AdvancedFearOverrideRegistry {
     }
 
     public static boolean shouldFear(Mob mob, @Nullable ResourceLocation soundId) {
-        // No rules configured -> allow by default
+        if (!HAS_DYNAMIC_CONDITIONS && (!BY_TYPE.isEmpty() || !WILDCARD.isEmpty())) {
+            boolean canCache = QuantifiedCacheCompat.isUsable();
+            if (canCache) {
+                String typeId = String.valueOf(ForgeRegistries.ENTITY_TYPES.getKey(mob.getType()));
+                String soundKey = (soundId != null ? soundId.toString() : "*");
+                String key = typeId + "|" + soundKey;
+                return QuantifiedCacheCompat.getCached(
+                        "fear_of_sound_should_fear",
+                        key,
+                        () -> shouldFearUncached(mob, soundId),
+                        Duration.ofSeconds(30),
+                        2048L,
+                        false
+                );
+            }
+        }
+        return shouldFearUncached(mob, soundId);
+    }
+
+    private static boolean shouldFearUncached(Mob mob, @Nullable ResourceLocation soundId) {
         if (BY_TYPE.isEmpty() && WILDCARD.isEmpty()) return true;
         List<AdvancedFearOverride> rules = new ArrayList<>(WILDCARD);
         List<AdvancedFearOverride> specific = BY_TYPE.get(mob.getType());
@@ -172,11 +197,9 @@ public final class AdvancedFearOverrideRegistry {
 
         CompoundTag mobNbt = null;
         for (AdvancedFearOverride r : rules) {
-            // sound filter
             if (!r.soundWildcard) {
                 if (soundId == null || !r.soundIds.contains(soundId)) continue;
             }
-            // conditions
             boolean conditionsPass;
             if ((r.nbtMatchers == null || r.nbtMatchers.isEmpty()) && (r.predicates == null || r.predicates.isEmpty())) {
                 conditionsPass = true;
@@ -191,7 +214,7 @@ public final class AdvancedFearOverrideRegistry {
                 }
                 conditionsPass = any;
             }
-            if (conditionsPass) return true; // any matching rule allows fear
+            if (conditionsPass) return true;
         }
         return false;
     }

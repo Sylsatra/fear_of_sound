@@ -5,6 +5,8 @@ plugins {
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
 }
 
+jarJar.enable()
+
 version = mod_version
 group = mod_group_id
 
@@ -125,7 +127,11 @@ dependencies {
     compileOnly "de.maxhenkel.voicechat:voicechat-api:2.5.27"
     runtimeOnly fg.deobf("maven.modrinth:simple-voice-chat:forge-1.20.1-2.5.27")
     compileOnly "curse.maven:timeless-and-classics-zero-1028108:6654541"
-    compileOnly "curse.maven:attract-to-sound-1213051:6729728"
+    compileOnly files('libs/forge_soundattract_1.20.1-7.0.2.jar')
+    implementation 'com.github.ben-manes.caffeine:caffeine:3.1.8'
+    jarJar(group: 'com.github.ben-manes.caffeine', name: 'caffeine', version: '[3.1.8,4.0)') {
+        jarJar.pin(it, '3.1.8')
+    }
 }
 
 // This block of code expands all declared replace properties in the specified resource targets.
@@ -163,6 +169,10 @@ tasks.named('jar', Jar).configure {
 
     // This is the preferred method to reobfuscate your jar file
     finalizedBy 'reobfJar'
+}
+
+tasks.named('jarJar').configure {
+    finalizedBy 'reobfJarJar'
 }
 
 // However if you are in a multi-project build, dev time needs unobfed jar files, so you can delay the obfuscation until publishing by doing:
